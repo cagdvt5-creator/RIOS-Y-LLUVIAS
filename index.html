@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ríos de Santa Marta · lluvia, caudal y respuesta de la cuenca</title>
+<meta name="description" content="Caudal de los ríos de Santa Marta, pronóstico de lluvia y cuándo podría crecer o bajar cada río.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{
+  --bg:#eef2ee; --paper:#fbfcfa; --ink:#0c2a33; --ink2:#46636b; --line:#d3ddd8;
+  --river:#0a6c97; --rain:#6a5be2; --glofas:#0c2a33;
+  --surge:#e4572e; --fall:#1f9a8a; --steady:#3a7ca5; --dry:#c98f0a;
+  --radius:14px;
+  --head:'Bricolage Grotesque','Segoe UI',system-ui,sans-serif;
+  --body:'Instrument Sans','Segoe UI',system-ui,sans-serif;
+}
+:root[data-theme="dark"]{
+  --bg:#0a1a20; --paper:#10272f; --ink:#e7f1ee; --ink2:#93b0b3; --line:#21424b;
+  --river:#4cc3f0; --rain:#9d92ff; --glofas:#e7f1ee;
+  --surge:#ff7a52; --fall:#4fd1bd; --steady:#6bb4dc; --dry:#f0b84a;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--head);margin:0;line-height:1.1;letter-spacing:-.02em}
+a{color:var(--river)}
+button{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--rain);outline-offset:2px;border-radius:6px}
+.wrap{max-width:1280px;margin:0 auto;padding:0 20px}
+
+/* Cabecera */
+header.top{padding:28px 0 18px}
+.top-row{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+h1{font-size:clamp(2rem,4.6vw,3.6rem);font-weight:800;max-width:15ch}
+h1 span{color:var(--river)}
+.lede{max-width:56ch;color:var(--ink2);margin:12px 0 0;font-size:1.05rem}
+.tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:7px 14px;font-size:.88rem;cursor:pointer}
+.pill:hover{border-color:var(--river)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--fall);display:inline-block}
+.dot.demo{background:var(--dry)}
+.dot.load{background:var(--steady);animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.25}}
+
+.banner{display:none;margin:0 0 14px;border:1px solid var(--dry);background:color-mix(in srgb,var(--dry) 14%,var(--paper));border-radius:var(--radius);padding:12px 16px;font-size:.95rem}
+.banner.on{display:block}
+
+/* Resumen del día */
+.today{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}
+.t{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+.t b{display:block;font-family:var(--head);font-size:1.9rem;font-weight:700;letter-spacing:-.03em}
+.t small{color:var(--ink2);font-size:.9rem}
+.t b em{font-style:normal;font-size:1rem;color:var(--ink2);font-weight:500;margin-left:4px}
+
+/* Mapa + lista */
+.stage{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:16px;align-items:stretch}
+#map{min-height:520px;height:100%;border-radius:var(--radius);border:1px solid var(--line);overflow:hidden;background:#dfe9ee}
+.leaflet-container{font-family:var(--body)}
+.flow{stroke-dasharray:1 9;animation:run 1.6s linear infinite}
+.flow.fast{animation-duration:.8s}.flow.slow{animation-duration:3.4s}
+@keyframes run{to{stroke-dashoffset:-20}}
+.pulse{width:18px;height:18px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 0 rgba(0,0,0,.25);animation:ping 2.2s infinite}
+@keyframes ping{70%{box-shadow:0 0 0 14px rgba(0,0,0,0)}100%{box-shadow:0 0 0 0 rgba(0,0,0,0)}}
+
+.list{display:flex;flex-direction:column;gap:10px}
+.card{background:var(--paper);border:1.5px solid var(--line);border-radius:var(--radius);padding:14px 16px;cursor:pointer;text-align:left;width:100%;transition:border-color .15s,transform .15s}
+.card:hover{border-color:var(--river)}
+.card[aria-pressed="true"]{border-color:var(--river);box-shadow:0 0 0 3px color-mix(in srgb,var(--river) 20%,transparent)}
+.card-h{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.card h3{font-size:1.15rem}
+.badge{font-size:.8rem;font-weight:600;padding:3px 10px;border-radius:999px;color:#fff;white-space:nowrap}
+.card-m{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:8px}
+.q{font-family:var(--head);font-size:2.1rem;font-weight:700;letter-spacing:-.03em;line-height:1}
+.q small{font-family:var(--body);font-size:.85rem;font-weight:500;color:var(--ink2);margin-left:4px}
+.qlab{font-size:.82rem;color:var(--ink2);margin-top:2px}
+.card p{margin:8px 0 0;font-size:.92rem;color:var(--ink2)}
+.spark{width:120px;height:38px;flex:none}
+
+/* Detalle */
+section.detail{margin:22px 0 0;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:22px}
+.d-head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.d-head h2{font-size:clamp(1.6rem,3vw,2.3rem)}
+.d-head p{margin:6px 0 0;color:var(--ink2);max-width:62ch}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.85rem;color:var(--ink2);margin:16px 0 6px}
+.legend i{display:inline-block;width:18px;height:4px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.chartbox{position:relative}
+svg.chart{width:100%;display:block;touch-action:pan-y}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--bg);padding:8px 10px;border-radius:8px;font-size:.82rem;line-height:1.4;opacity:0;transition:opacity .1s;white-space:nowrap;z-index:5}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}
+.m{border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.m b{font-family:var(--head);font-size:1.45rem;font-weight:700;display:block;letter-spacing:-.02em}
+.m span{font-size:.86rem;color:var(--ink2)}
+.reading{margin-top:18px;padding:16px 18px;border-left:5px solid var(--river);background:color-mix(in srgb,var(--river) 7%,var(--paper));border-radius:0 12px 12px 0}
+.reading p{margin:.3em 0}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+.panel{border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+.panel h3{font-size:1.25rem;margin-bottom:4px}
+.panel>p.s{margin:0 0 12px;color:var(--ink2);font-size:.92rem}
+.ctl{display:grid;grid-template-columns:140px 1fr 64px;gap:10px;align-items:center;margin:9px 0;font-size:.92rem}
+.ctl output{text-align:right;font-weight:600}
+input[type=range]{width:100%;accent-color:var(--river)}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.btn{border:1px solid var(--line);background:var(--paper);padding:8px 14px;border-radius:10px;cursor:pointer;font-size:.9rem}
+.btn:hover{border-color:var(--river)}
+.btn.main{background:var(--river);color:#fff;border-color:var(--river)}
+:root[data-theme="dark"] .btn.main{color:#06222b}
+.labres{margin-top:12px;font-size:.95rem;min-height:3em}
+svg.small{width:100%;display:block}
+
+details{margin-top:16px;border:1px solid var(--line);border-radius:var(--radius);padding:4px 18px;background:var(--paper)}
+summary{cursor:pointer;padding:12px 0;font-family:var(--head);font-size:1.15rem;font-weight:700}
+details p,details li{color:var(--ink2);font-size:.95rem;max-width:80ch}
+footer{padding:28px 0 50px;color:var(--ink2);font-size:.88rem}
+
+@media(max-width:980px){
+  .stage{grid-template-columns:1fr}
+  #map{min-height:420px}
+  .today{grid-template-columns:repeat(2,1fr)}
+  .grid2{grid-template-columns:1fr}
+}
+@media(max-width:560px){
+  .metrics{grid-template-columns:1fr 1fr}
+  .ctl{grid-template-columns:1fr 64px}
+  .ctl label{grid-column:1/-1}
+  section.detail{padding:16px}
+}
+@media(prefers-reduced-motion:reduce){
+  .flow,.pulse,.dot.load{animation:none}
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <div class="top-row">
+      <div>
+        <h1>Cuando llueve en la Sierra, ¿cuándo <span>crece el río</span>?</h1>
+        <p class="lede">Los ríos de Santa Marta no responden de inmediato a la lluvia. Aquí ves el caudal de ayer, la lluvia observada y pronosticada, y cuándo se esperaría la subida o la bajada en cada cuenca.</p>
+      </div>
+      <div class="tools">
+        <span class="pill" id="statusPill" role="status"><span class="dot load" id="statusDot"></span><span id="statusText">Cargando datos…</span></span>
+        <button class="pill" id="themeBtn" type="button" aria-label="Cambiar tema claro u oscuro">Tema oscuro</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="banner" id="banner"></div>
+
+  <div class="today" id="today" aria-live="polite"></div>
+
+  <div class="stage">
+    <div id="map" role="application" aria-label="Mapa de los ríos de Santa Marta"></div>
+    <div class="list" id="list"></div>
+  </div>
+
+  <section class="detail" id="detail" aria-live="polite"></section>
+
+  <details>
+    <summary>Cómo se calcula y qué tan confiable es</summary>
+    <ul>
+      <li><b>Lluvia observada y pronosticada:</b> modelos meteorológicos de Open-Meteo, hora a hora, para el centro de cada cuenca. Cubre los últimos 92 días y los próximos 7.</li>
+      <li><b>Caudal de referencia (línea oscura):</b> reanálisis y pronóstico de caudal GloFAS vía Open-Meteo. Es un modelo global con celdas de unos 5 km, así que en ríos pequeños como estos puede equivocarse en magnitud. Úsalo para ver la forma y el momento de los cambios, no como medición.</li>
+      <li><b>Modelo de la cuenca (línea azul):</b> dos embalses lineales en cascada (el tiempo de respuesta es el rezago hasta el pico), un coeficiente de escorrentía que sube con la humedad previa y un flujo base que decae de forma exponencial. Sus parámetros son supuestos razonables, <b>no están calibrados</b>. Puedes ajustarlos en el laboratorio.</li>
+      <li><b>Rezago observado:</b> correlación entre la lluvia diaria y los aumentos diarios del caudal GloFAS en los últimos 92 días. Es una pista del tiempo de respuesta, no una medida de campo.</li>
+      <li><b>Datos oficiales:</b> puedes cargar un CSV de una estación (por ejemplo del IDEAM) con las columnas <code>fecha,caudal</code> y se dibujará sobre la gráfica para comparar.</li>
+      <li><b>Importante:</b> esto es una herramienta educativa y de análisis. No sustituye las alertas del IDEAM, la UNGRD ni la Gestión del Riesgo del Distrito.</li>
+    </ul>
+  </details>
+</main>
+
+<footer>
+  <div class="wrap">
+    Datos: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (clima y GloFAS), © colaboradores de <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> (cauces y mapa base), © CARTO. Los ríos se dibujan con datos de OpenStreetMap; si no cargan, se muestra un trazado esquemático aproximado.
+  </div>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+
+/* ============================================================
+   CONFIGURACIÓN DE RÍOS  (edita aquí coordenadas y parámetros)
+   A: área de la cuenca (km²)   lag: tiempo de respuesta al pico (h)
+   c0/c1: coeficiente de escorrentía con suelo seco / saturado
+   kb: recesión diaria del flujo base   base: flujo base inicial (m³/s)
+   basin: punto del que se toma la lluvia   gauge: punto para el caudal
+   ============================================================ */
+const RIVERS = [
+  { id:'manzanares', name:'Río Manzanares', note:'Cruza el área urbana de Santa Marta',
+    basin:[11.18,-74.10], gauge:[11.232,-74.190], A:62,  lag:5,  c0:.20, c1:.60, kb:.93, base:.5,
+    path:[[11.185,-74.085],[11.205,-74.125],[11.222,-74.160],[11.232,-74.190],[11.238,-74.214]] },
+  { id:'piedras',    name:'Río Piedras', note:'Cuenca norte, hacia Taganga y Bello Horizonte',
+    basin:[11.21,-74.08], gauge:[11.250,-74.150], A:105, lag:6,  c0:.18, c1:.58, kb:.94, base:.9,
+    path:[[11.200,-74.060],[11.235,-74.100],[11.250,-74.150],[11.258,-74.185],[11.262,-74.200]] },
+  { id:'gaira',      name:'Río Gaira', note:'Hacia El Rodadero y Gaira',
+    basin:[11.15,-74.10], gauge:[11.190,-74.165], A:140, lag:7,  c0:.18, c1:.55, kb:.95, base:1.4,
+    path:[[11.130,-74.070],[11.165,-74.110],[11.190,-74.160],[11.200,-74.205],[11.203,-74.232]] },
+  { id:'guachaca',   name:'Río Guachaca', note:'Cuenca grande al oriente del distrito',
+    basin:[11.15,-73.98], gauge:[11.250,-73.935], A:230, lag:11, c0:.15, c1:.52, kb:.96, base:4,
+    path:[[11.130,-73.930],[11.190,-73.930],[11.240,-73.932],[11.275,-73.936],[11.287,-73.945]] }
+];
+
+const TZ = 'America/Bogota';
+const H = 3600e3, D = 86400e3;
+const COLORS = { surge:'#e4572e', fall:'#1f9a8a', steady:'#3a7ca5', dry:'#c98f0a' };
+const LABELS = { surge:'Subida esperada', fall:'En descenso', steady:'Estable', dry:'Temporada seca' };
+
+const S = { data:{}, sel:'manzanares', demo:false, lab:null, osm:false };
+const $ = id => document.getElementById(id);
+
+/* ---------- utilidades ---------- */
+const fmtQ = q => q==null||isNaN(q) ? '–' : (q<10 ? q.toFixed(2) : q<100 ? q.toFixed(1) : Math.round(q).toString());
+const fmtMM = v => v<10 ? v.toFixed(1) : Math.round(v).toString();
+const dtf = new Intl.DateTimeFormat('es-CO',{timeZone:TZ,weekday:'short',day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true});
+const dtfDay = new Intl.DateTimeFormat('es-CO',{timeZone:TZ,weekday:'short',day:'numeric',month:'short'});
+const dtfShort = new Intl.DateTimeFormat('es-CO',{timeZone:TZ,day:'2-digit',month:'2-digit'});
+const fmtDT = ms => dtf.format(ms).replace(/\./g,'');
+const fmtDay = ms => dtfDay.format(ms).replace(/\./g,'');
+const dayStr = ms => new Date(ms - 5*H).toISOString().slice(0,10);   // fecha local de Bogotá (UTC-5)
+const parseLocal = s => Date.parse(s.length===10 ? s+'T12:00:00-05:00' : s+':00-05:00');
+const sum = (a,i,j) => { let s=0; for(let k=Math.max(0,i);k<=Math.min(a.length-1,j);k++) s+=a[k]||0; return s; };
+const median = a => { const b=[...a].sort((x,y)=>x-y); return b.length? b[Math.floor(b.length/2)] : NaN; };
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function hoursText(h){ h=Math.round(h); if(h<1) return 'menos de 1 hora'; if(h<36) return h+' h'; return (h/24).toFixed(1).replace('.0','')+' días'; }
+
+/* ============================================================
+   MODELO HIDROLÓGICO
+   Cascada de 2 embalses lineales + escorrentía dependiente de la
+   humedad previa + flujo base con recesión exponencial.
+   P: lluvia horaria (mm/h)  →  Q: caudal horario (m³/s)
+   ============================================================ */
+function simulate(P, prm){
+  const K = Math.max(.5, prm.lag), aK = 1 - Math.exp(-1/K);
+  const Kb = -24/Math.log(prm.kb), aB = 1 - Math.exp(-1/Kb);
+  const dec = Math.pow(.9, 1/24);
+  const floor = prm.base * .12;
+  let s1=0, s2=0, w=0, sb = (prm.base*3.6/prm.A)*Kb;
+  const Q = new Float64Array(P.length);
+  for(let i=0;i<P.length;i++){
+    const p = P[i]||0;
+    w = w*dec + p;
+    const ce = prm.c0 + (prm.c1-prm.c0)*Math.min(1, w/50);
+    s1 += ce*p;  const o1 = s1*aK; s1 -= o1;
+    s2 += o1;    const o2 = s2*aK; s2 -= o2;
+    sb += .12*(1-ce)*p; const ob = sb*aB; sb -= ob;
+    Q[i] = (o2 + ob)*prm.A/3.6 + floor;
+  }
+  return Q;
+}
+
+/* ---------- carga de datos ---------- */
+async function getJSON(url, ms=20000){
+  const c = new AbortController(); const t = setTimeout(()=>c.abort(), ms);
+  try{ const r = await fetch(url,{signal:c.signal}); if(!r.ok) throw new Error(r.status); return await r.json(); }
+  finally{ clearTimeout(t); }
+}
+
+async function loadRiver(r){
+  const wx = `https://api.open-meteo.com/v1/forecast?latitude=${r.basin[0]}&longitude=${r.basin[1]}&hourly=precipitation&daily=precipitation_sum&past_days=92&forecast_days=7&timezone=${encodeURIComponent(TZ)}`;
+  const fl = `https://flood-api.open-meteo.com/v1/flood?latitude=${r.gauge[0]}&longitude=${r.gauge[1]}&daily=river_discharge&past_days=92&forecast_days=7`;
+  const [a,b] = await Promise.allSettled([getJSON(wx), getJSON(fl)]);
+  if(a.status!=='fulfilled') throw new Error('sin clima');
+  const w = a.value;
+  const t = w.hourly.time.map(parseLocal);
+  const P = w.hourly.precipitation.map(v=>v||0);
+  const dTime = w.daily.time, dP = w.daily.precipitation_sum.map(v=>v||0);
+  let glo = null;
+  if(b.status==='fulfilled' && b.value.daily && b.value.daily.river_discharge){
+    glo = { time:b.value.daily.time, q:b.value.daily.river_discharge };
+    if(glo.q.filter(v=>v!=null).length < 10) glo = null;
+  }
+  return { t, P, dTime, dP, glo, real:true };
+}
+
+/* Datos de demostración (solo si no hay internet o fallan las APIs) */
+function demoRiver(r, idx){
+  let seed = 1234 + idx*77;
+  const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed>>>15, 1|seed); t = t + Math.imul(t ^ t>>>7, 61|t) ^ t; return ((t ^ t>>>14)>>>0)/4294967296; };
+  const start = Math.floor((Date.now()-5*H)/D)*D + 5*H - 92*D;
+  const n = 99*24, t = [], P = new Array(n).fill(0);
+  for(let i=0;i<n;i++) t.push(start + i*H);
+  const storms = 14;
+  for(let s=0;s<storms;s++){
+    const c = Math.floor(rnd()*n), amp = 4+rnd()*22, len = 2+Math.floor(rnd()*6);
+    for(let k=0;k<len;k++) if(c+k<n) P[c+k] += amp*Math.exp(-k/2.2)*(.5+rnd());
+  }
+  const dTime=[], dP=[];
+  for(let d=0; d<99; d++){ dTime.push(dayStr(start+d*D+6*H)); dP.push(sum(P,d*24,d*24+23)); }
+  const Q = simulate(P, r), gTime=[], gq=[];
+  for(let d=0; d<99; d++){ gTime.push(dTime[d]); gq.push(Q.slice(d*24,d*24+24).reduce((x,y)=>x+y,0)/24*(0.8+rnd()*.4)); }
+  return { t, P, dTime, dP, glo:{time:gTime,q:gq}, real:false };
+}
+
+/* ---------- análisis por río ---------- */
+function analyze(r, d, prmOverride, extraRain){
+  const prm = Object.assign({}, r, prmOverride||{});
+  const P = d.P.slice();
+  const now = Date.now();
+  let i0 = 0; while(i0 < d.t.length-1 && d.t[i0+1] <= now) i0++;
+  if(extraRain && extraRain.mm>0){
+    for(let k=0;k<extraRain.dur;k++){ const j=i0+1+k; if(j<P.length) P[j] += extraRain.mm/extraRain.dur; }
+  }
+  const Q = simulate(P, prm);
+  const out = { prm, P, Q, i0, now };
+
+  // Ayer
+  const yd = dayStr(now - D);
+  const idxs = []; d.t.forEach((tt,i)=>{ if(dayStr(tt)===yd) idxs.push(i); });
+  out.yModel = idxs.length ? idxs.reduce((s,i)=>s+Q[i],0)/idxs.length : Q[i0];
+  out.yGlo = null;
+  if(d.glo){ const k = d.glo.time.indexOf(yd); if(k>=0 && d.glo.q[k]!=null) out.yGlo = d.glo.q[k]; }
+  out.yQ = out.yGlo!=null ? out.yGlo : out.yModel;
+  out.ySrc = out.yGlo!=null ? 'GloFAS' : 'modelo de la cuenca';
+
+  // Lluvia
+  out.r24 = sum(P,i0-23,i0); out.r7 = sum(P,i0-167,i0);
+  out.f24 = sum(P,i0+1,i0+24); out.f72 = sum(P,i0+1,i0+72); out.f7 = sum(P,i0+1,i0+168);
+  out.rAll24y = sum(d.P, idxs[0]||0, idxs[idxs.length-1]||0);
+
+  // Última lluvia significativa (≥5 mm en 6 h) y respuesta esperada
+  out.last = null;
+  for(let j=i0; j>=Math.max(5,i0-24*6); j--){
+    if(sum(P,j-5,j) >= 5){
+      let k=j-5, tot=0, wt=0; for(;k<=j;k++){ tot+=P[k]; wt+=P[k]*d.t[k]; }
+      const center = wt/tot;
+      out.last = { when:center, mm:sum(P,j-5,j), peak:center + prm.lag*H };
+      break;
+    }
+  }
+
+  // Próxima subida
+  const q0 = Q[i0];
+  let pkI=i0; for(let k=i0;k<Math.min(Q.length,i0+169);k++) if(Q[k]>Q[pkI]) pkI=k;
+  const ratio = Q[pkI]/Math.max(q0,.01);
+  out.q0 = q0; out.peak = null;
+  if(ratio>1.25 && pkI>i0){
+    let rs=i0; for(let k=i0;k<=pkI;k++){ if(Q[k]>=q0*1.1){ rs=k; break; } }
+    out.peak = { t:d.t[pkI], q:Q[pkI], ratio, start:d.t[rs] };
+  }
+  // Tendencia (-24 h)
+  const qPrev = Q[Math.max(0,i0-24)];
+  out.trend = (q0-qPrev)/Math.max(qPrev,.01);
+
+  // Recesión empírica con GloFAS (descensos consecutivos) o del modelo
+  out.k = prm.kb; out.kSrc = 'supuesto del modelo';
+  if(d.glo){
+    const g = d.glo.q, nowIdx = d.glo.time.indexOf(dayStr(now)), end = nowIdx>0? nowIdx : g.length-7;
+    const ratios=[];
+    for(let k=2;k<end;k++){ if(g[k]!=null&&g[k-1]!=null&&g[k-2]!=null&&g[k]<g[k-1]&&g[k-1]<g[k-2]&&g[k-1]>0) ratios.push(g[k]/g[k-1]); }
+    if(ratios.length>=5){ out.k = Math.min(.995, Math.max(.8, median(ratios))); out.kSrc='descensos de los últimos 92 días'; }
+  }
+  out.half = Math.log(.5)/Math.log(out.k);
+  out.dryProj = d7 => q0*Math.pow(out.k,d7);
+
+  // Estado
+  const dryNow = out.r7 < 12 && out.f7 < 12;
+  if(out.peak) out.status='surge';
+  else if(dryNow) out.status='dry';
+  else if(out.trend < -.05) out.status='fall';
+  else out.status='steady';
+  if(!out.peak && out.trend < -.05 && !dryNow) out.status='fall';
+  if(dryNow && out.trend < -.02) out.status='dry';
+  return out;
+}
+
+/* Rezago empírico: correlación lluvia(t-lag) vs aumento diario de caudal */
+function empiricalLag(d){
+  if(!d.glo) return null;
+  const today = dayStr(Date.now());
+  const P={}; d.dTime.forEach((s,i)=>P[s]=d.dP[i]);
+  const dates=d.glo.time, q=d.glo.q;
+  const nowI = dates.indexOf(today); const end = nowI>0 ? nowI : dates.length-7;
+  const res=[];
+  for(let lag=0;lag<=4;lag++){
+    const xs=[],ys=[];
+    for(let k=5;k<end;k++){
+      const prev = dates[k-lag]; if(P[prev]==null||q[k]==null||q[k-1]==null) continue;
+      xs.push(P[prev]); ys.push(Math.max(0,q[k]-q[k-1]));
+    }
+    const n=xs.length; if(n<20){ res.push(0); continue; }
+    const mx=xs.reduce((a,b)=>a+b,0)/n, my=ys.reduce((a,b)=>a+b,0)/n;
+    let sxy=0,sxx=0,syy=0; for(let i=0;i<n;i++){ sxy+=(xs[i]-mx)*(ys[i]-my); sxx+=(xs[i]-mx)**2; syy+=(ys[i]-my)**2; }
+    res.push(sxx&&syy ? sxy/Math.sqrt(sxx*syy) : 0);
+  }
+  let best=0; res.forEach((v,i)=>{ if(v>res[best]) best=i; });
+  return { r:res, best };
+}
+
+/* ---------- interfaz: resumen ---------- */
+function renderToday(){
+  const A = RIVERS.map(r=>S.data[r.id]?.a).filter(Boolean);
+  if(!A.length){ $('today').innerHTML=''; return; }
+  const avg = f => A.reduce((s,a)=>s+f(a),0)/A.length;
+  const surging = A.filter(a=>a.status==='surge').length;
+  const soonest = A.filter(a=>a.peak).sort((x,y)=>x.peak.start-y.peak.start)[0];
+  $('today').innerHTML = `
+    <div class="t"><b>${fmtMM(avg(a=>a.r24))}<em>mm</em></b><small>Lluvia en las últimas 24 h (promedio de cuencas)</small></div>
+    <div class="t"><b>${fmtMM(avg(a=>a.f72))}<em>mm</em></b><small>Lluvia pronosticada en las próximas 72 h</small></div>
+    <div class="t"><b>${surging} de ${A.length}</b><small>${surging? 'ríos con subida esperada esta semana':'ríos con subida esperada: ninguno por ahora'}</small></div>
+    <div class="t"><b>${soonest? fmtDT(soonest.peak.start).replace(/^\w+\s/,''):'Sin crecidas'}</b><small>${soonest? 'Primera subida estimada: '+esc(RIVERS.find(r=>S.data[r.id].a===soonest).name):'No se espera aumento importante de caudal'}</small></div>`;
+}
+
+/* ---------- interfaz: tarjetas ---------- */
+function message(a){
+  if(a.status==='surge'){
+    return `Subiría desde ${fmtDT(a.peak.start)}. Pico estimado de ${fmtQ(a.peak.q)} m³/s el ${fmtDT(a.peak.t)} (×${a.peak.ratio.toFixed(1)}).`;
+  }
+  if(a.last && a.last.peak > a.now){
+    return `Llovió ${fmtMM(a.last.mm)} mm recientemente. El efecto máximo llegaría en torno a ${fmtDT(a.last.peak)}.`;
+  }
+  if(a.status==='dry') return `Sin lluvias relevantes. Sin lluvia, bajaría a la mitad en ~${a.half.toFixed(1)} días.`;
+  if(a.status==='fall') return `Baja ${Math.abs(a.trend*100).toFixed(0)}% en 24 h. Sin lluvia, caería a la mitad en ~${a.half.toFixed(1)} días.`;
+  return 'Caudal estable. No hay lluvia suficiente en el pronóstico para cambiarlo.';
+}
+function sparkline(r, d, a){
+  const i0=a.i0, from=Math.max(0,i0-72), to=Math.min(a.Q.length-1,i0+168);
+  let mx=0; for(let i=from;i<=to;i++) mx=Math.max(mx,a.Q[i]);
+  const w=120,h=38; let p='';
+  for(let i=from;i<=to;i+=3){ const x=(i-from)/(to-from)*w, y=h-2-(a.Q[i]/Math.max(mx,.01))*(h-6); p+=(p?'L':'M')+x.toFixed(1)+' '+y.toFixed(1); }
+  const nx=(i0-from)/(to-from)*w;
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" aria-hidden="true"><rect x="${nx}" y="0" width="${w-nx}" height="${h}" fill="currentColor" opacity=".07"/><path d="${p}" fill="none" stroke="${COLORS[a.status]}" stroke-width="2"/></svg>`;
+}
+function renderList(){
+  $('list').innerHTML = RIVERS.map(r=>{
+    const x=S.data[r.id];
+    if(!x || !x.a) return `<div class="card"><h3>${esc(r.name)}</h3><p>${x&&x.err?'No se pudieron cargar los datos.':'Cargando…'}</p></div>`;
+    const a=x.a;
+    return `<button class="card" data-id="${r.id}" aria-pressed="${S.sel===r.id}">
+      <div class="card-h"><h3>${esc(r.name)}</h3><span class="badge" style="background:${COLORS[a.status]}">${LABELS[a.status]}</span></div>
+      <div class="card-m"><div><div class="q">${fmtQ(a.yQ)}<small>m³/s</small></div><div class="qlab">Caudal de ayer · ${a.ySrc}</div></div>${sparkline(r,x,a)}</div>
+      <p>${message(a)}</p></button>`;
+  }).join('');
+  document.querySelectorAll('.card[data-id]').forEach(b=>b.addEventListener('click',()=>select(b.dataset.id)));
+}
+
+/* ---------- mapa ---------- */
+let map, riverLayers={}, markers={};
+function initMap(){
+  map = L.map('map',{scrollWheelZoom:false}).setView([11.20,-74.08],10);
+  const light = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{maxZoom:18,attribution:'© OpenStreetMap, © CARTO'});
+  const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:17,attribution:'Imágenes © Esri'});
+  const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxZoom:17,attribution:'© OpenTopoMap'});
+  light.addTo(map);
+  L.control.layers({'Mapa claro':light,'Relieve':topo,'Satélite':sat},null,{position:'topright'}).addTo(map);
+  map.on('focus',()=>map.scrollWheelZoom.enable()); map.on('blur',()=>map.scrollWheelZoom.disable());
+  RIVERS.forEach(r=>{
+    riverLayers[r.id] = L.layerGroup().addTo(map);
+    drawSchematic(r);
+    const icon = L.divIcon({className:'',html:`<div class="pulse" id="pm-${r.id}" style="background:#999"></div>`,iconSize:[18,18]});
+    markers[r.id] = L.marker(r.gauge,{icon}).addTo(map).bindTooltip(r.name,{direction:'top'}).on('click',()=>select(r.id));
+  });
+  map.fitBounds([[11.10,-74.27],[11.32,-73.88]]);
+}
+function drawSchematic(r){
+  riverLayers[r.id].clearLayers();
+  L.polyline(r.path,{className:'flow',color:'#0a6c97',weight:4,opacity:.9,dashArray:'1 9',lineCap:'round'}).on('click',()=>select(r.id)).addTo(riverLayers[r.id]);
+}
+async function loadOSM(){
+  try{
+    const q = `[out:json][timeout:25];way["waterway"~"^(river|stream)$"]["name"~"^R.o (Manzanares|Piedras|Gaira|Guachaca)"](10.95,-74.45,11.55,-73.70);out geom;`;
+    const res = await fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'}});
+    if(!res.ok) throw 0;
+    const js = await res.json();
+    const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+    const found = {};
+    js.elements.forEach(e=>{
+      if(!e.geometry||!e.tags||!e.tags.name) return;
+      const r = RIVERS.find(r=>norm(e.tags.name).includes(r.id));
+      if(r){ (found[r.id]=found[r.id]||[]).push(e.geometry.map(p=>[p.lat,p.lon])); }
+    });
+    Object.keys(found).forEach(id=>{
+      riverLayers[id].clearLayers();
+      found[id].forEach(line=>L.polyline(line,{className:'flow',color:'#0a6c97',weight:4,opacity:.9,dashArray:'1 9',lineCap:'round'}).on('click',()=>select(id)).addTo(riverLayers[id]));
+      RIVERS.find(r=>r.id===id).osm = true;
+    });
+    S.osm = Object.keys(found).length>0;
+    styleMap();
+  }catch(e){ /* se mantiene el trazado esquemático */ }
+}
+function styleMap(){
+  RIVERS.forEach(r=>{
+    const a=S.data[r.id]?.a; const col = a? COLORS[a.status] : '#8aa';
+    const sel = S.sel===r.id;
+    riverLayers[r.id].eachLayer(l=>{
+      l.setStyle({color:col,weight:sel?6:4,opacity:sel?1:.8});
+      const el=l.getElement(); if(el){ el.classList.remove('fast','slow'); if(a){ el.classList.add(a.status==='surge'?'fast':(a.status==='dry'?'slow':'x')); } }
+    });
+    const pm=document.getElementById('pm-'+r.id); if(pm){ pm.style.background=col; pm.style.transform=sel?'scale(1.25)':'none'; }
+  });
+}
+
+/* ---------- detalle ---------- */
+function select(id){
+  S.sel=id; S.lab=null;
+  document.querySelectorAll('.card[data-id]').forEach(b=>b.setAttribute('aria-pressed', b.dataset.id===id));
+  styleMap();
+  const r=RIVERS.find(x=>x.id===id); if(r) map.panTo(r.gauge,{animate:true});
+  renderDetail();
+}
+
+function getObs(id){ try{ return JSON.parse(localStorage.getItem('obs_'+id)||'null'); }catch(e){ return null; } }
+function setObs(id,v){ try{ v? localStorage.setItem('obs_'+id,JSON.stringify(v)) : localStorage.removeItem('obs_'+id); }catch(e){} }
+
+function renderDetail(){
+  const r = RIVERS.find(x=>x.id===S.sel), x = S.data[r.id];
+  const el = $('detail');
+  if(!x || !x.a){ el.innerHTML = `<h2>${esc(r.name)}</h2><p>${x&&x.err?'No se pudieron cargar los datos de este río. Revisa tu conexión y recarga la página.':'Cargando datos…'}</p>`; return; }
+  const a = x.a;
+  const lag = empiricalLag(x);
+  const lagTxt = lag ? `${lag.best} día${lag.best===1?'':'s'}` : 'sin datos';
+  const obs = getObs(r.id);
+
+  el.innerHTML = `
+    <div class="d-head">
+      <div><h2>${esc(r.name)}</h2><p>${esc(r.note)}. Cuenca de ~${r.A} km². ${r.osm||!S.osm?'':'El cauce mostrado es esquemático.'}</p></div>
+      <span class="badge" style="background:${COLORS[a.status]};font-size:.95rem;padding:6px 14px">${LABELS[a.status]}</span>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--rain)"></i>Lluvia por hora (mm)</span>
+      <span><i style="background:var(--river)"></i>Caudal modelado de la cuenca</span>
+      ${x.glo?'<span><i style="background:var(--glofas);height:2px"></i>Caudal GloFAS (diario)</span>':''}
+      <span id="labLeg" style="display:none"><i style="background:var(--surge)"></i>Con tu escenario</span>
+      ${obs?'<span><i style="background:var(--dry);height:8px;width:8px;border-radius:50%"></i>Datos de estación</span>':''}
+    </div>
+    <div class="chartbox"><svg class="chart" id="chart" role="img" aria-label="Gráfica de lluvia y caudal"></svg><div class="tip" id="tip"></div></div>
+
+    <div class="metrics">
+      <div class="m"><b>${fmtQ(a.yQ)} m³/s</b><span>Caudal de ayer (${a.ySrc})</span></div>
+      <div class="m"><b>${fmtMM(a.r24)} mm / ${fmtMM(a.r7)} mm</b><span>Lluvia observada: 24 h / 7 días</span></div>
+      <div class="m"><b>${fmtMM(a.f72)} mm / ${fmtMM(a.f7)} mm</b><span>Pronóstico: 72 h / 7 días</span></div>
+      <div class="m"><b>${r.lag} h</b><span>Tiempo de respuesta supuesto (lluvia → pico)</span></div>
+      <div class="m"><b>${lagTxt}</b><span>Rezago observado en los datos${lag&&lag.r[lag.best]>0?` (r = ${lag.r[lag.best].toFixed(2)})`:''}</span></div>
+      <div class="m"><b>${a.half>200?'>200':a.half.toFixed(1)} días</b><span>Para caer a la mitad sin lluvia</span></div>
+    </div>
+
+    <div class="reading" id="reading"></div>
+
+    <div class="grid2">
+      <div class="panel">
+        <h3>Laboratorio de escenarios</h3>
+        <p class="s">Simula una lluvia hipotética a partir de la próxima hora y cambia cómo responde la cuenca.</p>
+        <div class="ctl"><label for="lRain">Lluvia adicional</label><input type="range" id="lRain" min="0" max="150" step="5" value="0"><output id="oRain">0 mm</output></div>
+        <div class="ctl"><label for="lDur">Duración</label><input type="range" id="lDur" min="1" max="12" step="1" value="3"><output id="oDur">3 h</output></div>
+        <div class="ctl"><label for="lLag">Respuesta de la cuenca</label><input type="range" id="lLag" min="1" max="30" step="1" value="${r.lag}"><output id="oLag">${r.lag} h</output></div>
+        <div class="ctl"><label for="lC">Suelo saturado</label><input type="range" id="lC" min="10" max="90" step="5" value="${Math.round(r.c1*100)}"><output id="oC">${Math.round(r.c1*100)}%</output></div>
+        <div class="btnrow"><button class="btn" id="lReset" type="button">Restablecer</button></div>
+        <div class="labres" id="labRes">Mueve los controles para ver el efecto.</div>
+      </div>
+      <div class="panel">
+        <h3>¿Cuánto tarda en responder?</h3>
+        <p class="s">Relación entre la lluvia de un día y el aumento de caudal los días siguientes, en los últimos 92 días.</p>
+        <svg class="small" id="lagChart" viewBox="0 0 400 150" role="img" aria-label="Correlación por rezago"></svg>
+        <p class="s" style="margin-top:8px">Las barras más altas indican en qué rezago el caudal reacciona más a la lluvia. GloFAS es un modelo, así que esto no reemplaza una estación.</p>
+        <div class="btnrow">
+          <label class="btn" style="cursor:pointer">Cargar datos de estación (CSV)<input id="csv" type="file" accept=".csv,text/csv" hidden></label>
+          ${obs?'<button class="btn" id="csvClear" type="button">Quitar datos cargados</button>':''}
+          <button class="btn" id="dl" type="button">Descargar modelo (CSV)</button>
+        </div>
+        <div class="labres" id="csvMsg"></div>
+      </div>
+    </div>`;
+
+  drawChart(); drawLag(lag); writeReading(a, lag);
+  wireControls(r);
+}
+
+/* Texto de lectura hidrológica */
+function writeReading(a, lag){
+  const parts=[];
+  if(a.last){
+    const eta = a.last.peak - a.now;
+    parts.push(eta>0
+      ? `<p><b>Lluvia reciente:</b> cayeron unos ${fmtMM(a.last.mm)} mm alrededor de ${fmtDT(a.last.when)}. Con un tiempo de respuesta de ${a.prm.lag} h, el efecto en el cauce llegaría hacia ${fmtDT(a.last.peak)} (en ${hoursText(eta/H)}).</p>`
+      : `<p><b>Lluvia reciente:</b> la última lluvia fuerte (~${fmtMM(a.last.mm)} mm) fue ${fmtDT(a.last.when)}. Con ${a.prm.lag} h de respuesta, el pico ya habría pasado y el río estaría bajando.</p>`);
+  } else parts.push('<p><b>Lluvia reciente:</b> no hubo aguaceros fuertes (≥5 mm en 6 h) en los últimos 6 días.</p>');
+  if(a.peak) parts.push(`<p><b>Pronóstico:</b> hay lluvia prevista que haría crecer el caudal. La subida empezaría hacia ${fmtDT(a.peak.start)} y el pico (~${fmtQ(a.peak.q)} m³/s, ${a.peak.ratio.toFixed(1)} veces el valor actual) se daría hacia ${fmtDT(a.peak.t)}.</p>`);
+  else parts.push(`<p><b>Pronóstico:</b> ${a.f7<8?'casi no hay lluvia esperada en 7 días':'hay lluvia, pero no la suficiente para aumentar el caudal de forma notable'}.</p>`);
+  const d7=a.dryProj(7), d14=a.dryProj(14);
+  parts.push(`<p><b>Si deja de llover:</b> el caudal bajaría de ${fmtQ(a.q0)} a ~${fmtQ(d7)} m³/s en 7 días (${((1-d7/a.q0)*100).toFixed(0)}% menos) y a ~${fmtQ(d14)} m³/s en 14 días. Recesión estimada a partir de ${a.kSrc}.</p>`);
+  $('reading').innerHTML = parts.join('');
+}
+
+/* ---------- gráfica principal (SVG) ---------- */
+function drawChart(){
+  const r=RIVERS.find(x=>x.id===S.sel), x=S.data[r.id], a=x.a, lab=S.lab;
+  const svg=$('chart'); const W=svg.clientWidth||900, Hh = W<560?320:380;
+  svg.setAttribute('viewBox',`0 0 ${W} ${Hh}`); svg.setAttribute('height',Hh);
+  const m={l:46,r:12,t:10,b:30}, rainH=70, gap=14;
+  const flowTop=m.t+rainH+gap, flowBot=Hh-m.b;
+  const t0=a.now-10*D, t1=a.now+7*D;
+  const X = t => m.l + (t-t0)/(t1-t0)*(W-m.l-m.r);
+
+  const Q=a.Q, QL = lab? lab.Q : null;
+  const idxIn=[]; for(let i=0;i<x.t.length;i++) if(x.t[i]>=t0&&x.t[i]<=t1) idxIn.push(i);
+  let qmax=.5;
+  idxIn.forEach(i=>{ qmax=Math.max(qmax,Q[i], QL?QL[i]:0); });
+  if(x.glo) x.glo.time.forEach((s,k)=>{ const t=parseLocal(s); if(t>=t0&&t<=t1&&x.glo.q[k]!=null) qmax=Math.max(qmax,x.glo.q[k]); });
+  if(obs()) obs().forEach(o=>{ if(o.t>=t0&&o.t<=t1) qmax=Math.max(qmax,o.q); });
+  qmax*=1.1;
+  const Y = q => flowBot - q/qmax*(flowBot-flowTop);
+
+  // lluvia en bloques de 3 h (original + escenario)
+  const bars=[]; let pmax=3;
+  for(let i=idxIn[0]; i<=idxIn[idxIn.length-1]-2; i+=3){ const v=sum(lab?lab.P:a.P,i,i+2), v0=sum(a.P,i,i+2); bars.push({i,v,v0}); pmax=Math.max(pmax,v); }
+  const bw=Math.max(1.5,(W-m.l-m.r)/(17*8)-1);
+
+  let s='';
+  // zona de pronóstico
+  s+=`<rect x="${X(a.now)}" y="${m.t}" width="${W-m.r-X(a.now)}" height="${flowBot-m.t}" fill="var(--rain)" opacity=".06"/>`;
+  // rejilla y ejes de días
+  for(let d=Math.ceil(t0/D); d*D<=t1; d++){
+    const tt=d*D + 5*H; if(tt<t0||tt>t1) continue;
+    const xx=X(tt); const lbl = dtfShort.format(tt);
+    s+=`<line x1="${xx}" x2="${xx}" y1="${m.t}" y2="${flowBot}" stroke="var(--line)" stroke-width="1" opacity=".7"/>`;
+    if(W>520 || d%2===0) s+=`<text x="${xx+3}" y="${Hh-10}" font-size="11" fill="var(--ink2)">${lbl}</text>`;
+  }
+  for(let k=0;k<=4;k++){ const q=qmax*k/4, y=Y(q); s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-dasharray="3 4"/><text x="${m.l-6}" y="${y+4}" font-size="11" text-anchor="end" fill="var(--ink2)">${fmtQ(q)}</text>`; }
+  s+=`<text x="${m.l-6}" y="${flowTop-3}" font-size="10.5" text-anchor="end" fill="var(--ink2)">m³/s</text>`;
+  // lluvia
+  bars.forEach(b=>{
+    const h=b.v/pmax*(rainH-4); const xx=X(x.t[b.i]);
+    s+=`<rect x="${xx}" y="${m.t}" width="${bw}" height="${h}" fill="var(--rain)" opacity="${lab&&b.v>b.v0+.01?1:.75}" rx="1"/>`;
+  });
+  s+=`<text x="${m.l+4}" y="${m.t+12}" font-size="10.5" fill="var(--rain)">${fmtMM(pmax)} mm / 3 h</text>`;
+  // caudal modelo (área + línea)
+  const path = arr => idxIn.filter((_,k)=>k%2===0).map((i,k)=>(k?'L':'M')+X(x.t[i]).toFixed(1)+' '+Y(arr[i]).toFixed(1)).join('');
+  const pl = path(Q);
+  s+=`<path d="${pl}L${X(x.t[idxIn[idxIn.length-1]])} ${flowBot}L${X(x.t[idxIn[0]])} ${flowBot}Z" fill="var(--river)" opacity=".12"/>`;
+  s+=`<path d="${pl}" fill="none" stroke="var(--river)" stroke-width="2.4" stroke-linejoin="round"/>`;
+  if(QL) s+=`<path d="${path(QL)}" fill="none" stroke="var(--surge)" stroke-width="2.4" stroke-linejoin="round"/>`;
+  // GloFAS
+  if(x.glo){
+    let gp=''; x.glo.time.forEach((st,k)=>{ const t=parseLocal(st); if(t<t0||t>t1||x.glo.q[k]==null) return; gp+=(gp?'L':'M')+X(t).toFixed(1)+' '+Y(x.glo.q[k]).toFixed(1); });
+    s+=`<path d="${gp}" fill="none" stroke="var(--glofas)" stroke-width="1.6" stroke-dasharray="5 4"/>`;
+    x.glo.time.forEach((st,k)=>{ const t=parseLocal(st); if(t<t0||t>t1||x.glo.q[k]==null) return; s+=`<circle cx="${X(t)}" cy="${Y(x.glo.q[k])}" r="2.6" fill="var(--glofas)"/>`; });
+  }
+  // observados
+  (obs()||[]).forEach(o=>{ if(o.t>=t0&&o.t<=t1) s+=`<circle cx="${X(o.t)}" cy="${Y(o.q)}" r="4" fill="var(--dry)" stroke="var(--paper)" stroke-width="1.5"/>`; });
+  // pico esperado
+  const pk = lab? peakOf(lab.Q,x,a) : a.peak;
+  if(pk){ const px=X(pk.t), py=Y(pk.q); s+=`<circle cx="${px}" cy="${py}" r="6" fill="none" stroke="${lab?'var(--surge)':'var(--river)'}" stroke-width="2.4"/><text x="${Math.min(px,W-90)}" y="${py-12}" font-size="11.5" font-weight="600" fill="var(--ink)">Pico ${fmtDT(pk.t).replace(/^\w+\s/,'')}</text>`; }
+  // ahora
+  s+=`<line x1="${X(a.now)}" x2="${X(a.now)}" y1="${m.t}" y2="${flowBot}" stroke="var(--ink)" stroke-width="1.6"/><text x="${X(a.now)+5}" y="${flowBot-6}" font-size="11.5" font-weight="600" fill="var(--ink)">Ahora</text>`;
+  s+=`<text x="${X(a.now)-6}" y="${flowBot-6}" font-size="11" text-anchor="end" fill="var(--ink2)">observado</text><text x="${W-r_(m)}" y="${m.t+rainH+10}" font-size="11" text-anchor="end" fill="var(--ink2)">pronóstico</text>`;
+  s+=`<line id="cur" x1="0" x2="0" y1="${m.t}" y2="${flowBot}" stroke="var(--ink)" stroke-width="1" opacity="0"/>`;
+  s+=`<rect id="hit" x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${flowBot-m.t}" fill="transparent"/>`;
+  svg.innerHTML=s;
+  $('labLeg').style.display = lab? '' : 'none';
+
+  // tooltip
+  const tip=$('tip'), cur=$('cur'), hit=$('hit');
+  const move = ev => {
+    const rect=svg.getBoundingClientRect(); const px=(ev.touches?ev.touches[0].clientX:ev.clientX)-rect.left;
+    const t=t0+(px-m.l)/(W-m.l-m.r)*(t1-t0);
+    let bi=idxIn[0], bd=1e18; idxIn.forEach(i=>{ const dd=Math.abs(x.t[i]-t); if(dd<bd){bd=dd;bi=i;} });
+    const gx=X(x.t[bi]); cur.setAttribute('x1',gx); cur.setAttribute('x2',gx); cur.setAttribute('opacity',.5);
+    let gv=null; if(x.glo){ const k=x.glo.time.indexOf(dayStr(x.t[bi])); if(k>=0) gv=x.glo.q[k]; }
+    tip.innerHTML=`<b>${fmtDT(x.t[bi])}</b><br>Lluvia: ${(lab?lab.P:a.P)[bi].toFixed(1)} mm/h<br>Modelo: ${fmtQ(Q[bi])} m³/s${QL?`<br>Escenario: ${fmtQ(QL[bi])} m³/s`:''}${gv!=null?`<br>GloFAS (día): ${fmtQ(gv)} m³/s`:''}`;
+    tip.style.opacity=1;
+    const tw=tip.offsetWidth; let left=gx+12; if(left+tw>W) left=gx-tw-12; tip.style.left=left+'px'; tip.style.top=(m.t+rainH)+'px';
+  };
+  const leave=()=>{ tip.style.opacity=0; cur.setAttribute('opacity',0); };
+  hit.addEventListener('mousemove',move); hit.addEventListener('touchmove',move,{passive:true}); hit.addEventListener('touchstart',move,{passive:true});
+  hit.addEventListener('mouseleave',leave); hit.addEventListener('touchend',leave);
+}
+function r_(m){ return m.r+4; }
+function obs(){ return getObs(S.sel); }
+function peakOf(Q,x,a){
+  const i0=a.i0; let pk=i0; for(let k=i0;k<Math.min(Q.length,i0+169);k++) if(Q[k]>Q[pk]) pk=k;
+  const q0=Q[i0]; if(pk===i0||Q[pk]/Math.max(q0,.01)<1.25) return null;
+  return { t:x.t[pk], q:Q[pk], ratio:Q[pk]/Math.max(q0,.01) };
+}
+
+/* ---------- gráfica del rezago ---------- */
+function drawLag(lag){
+  const svg=$('lagChart'); if(!lag){ svg.outerHTML='<p class="s">No hay datos de caudal GloFAS para este cálculo.</p>'; return; }
+  const mx=Math.max(.2,...lag.r.map(Math.abs)); let s='';
+  s+=`<line x1="30" x2="390" y1="110" y2="110" stroke="var(--line)"/>`;
+  lag.r.forEach((v,i)=>{
+    const h=Math.max(1,Math.abs(v)/mx*88), x=50+i*70, best=i===lag.best;
+    s+=`<rect x="${x}" y="${110-h}" width="44" height="${h}" rx="4" fill="${best?'var(--river)':'var(--line)'}"/>`;
+    s+=`<text x="${x+22}" y="${110-h-5}" text-anchor="middle" font-size="12" fill="var(--ink)" font-weight="${best?700:400}">${v.toFixed(2)}</text>`;
+    s+=`<text x="${x+22}" y="128" text-anchor="middle" font-size="12" fill="var(--ink2)">${i===0?'mismo día':i+' d'}</text>`;
+  });
+  svg.innerHTML=s;
+}
+
+/* ---------- controles ---------- */
+function wireControls(r){
+  const x=S.data[r.id];
+  const ids=['lRain','lDur','lLag','lC'];
+  const upd=()=>{
+    const mm=+$('lRain').value, dur=+$('lDur').value, lg=+$('lLag').value, c=+$('lC').value/100;
+    $('oRain').textContent=mm+' mm'; $('oDur').textContent=dur+' h'; $('oLag').textContent=lg+' h'; $('oC').textContent=Math.round(c*100)+'%';
+    const changed = mm>0 || lg!==r.lag || Math.round(c*100)!==Math.round(r.c1*100);
+    if(!changed){ S.lab=null; $('labRes').textContent='Mueve los controles para ver el efecto.'; drawChart(); return; }
+    const lab=analyze(r,x,{lag:lg,c1:c,c0:Math.min(r.c0,c)},{mm,dur});
+    S.lab=lab; drawChart();
+    const pk=peakOf(lab.Q,x,x.a);
+    const base=x.a.peak;
+    $('labRes').innerHTML = pk
+      ? `Con este escenario el pico sería de <b>${fmtQ(pk.q)} m³/s</b> hacia ${fmtDT(pk.t)}${base?` (sin escenario: ${fmtQ(base.q)} m³/s)`:''}. Equivale a ${pk.ratio.toFixed(1)} veces el caudal actual.`
+      : 'En este escenario no se produce una subida notable del caudal en los próximos 7 días.';
+  };
+  ids.forEach(id=>$(id).addEventListener('input',upd));
+  $('lReset').addEventListener('click',()=>{ $('lRain').value=0;$('lDur').value=3;$('lLag').value=r.lag;$('lC').value=Math.round(r.c1*100); upd(); });
+
+  $('csv').addEventListener('change',async ev=>{
+    const f=ev.target.files[0]; if(!f) return;
+    const txt=await f.text(); const rows=[];
+    txt.split(/\r?\n/).forEach(line=>{
+      const p=line.split(/[;,\t]/); if(p.length<2) return;
+      const t=Date.parse(p[0].trim().length===10 ? p[0].trim()+'T12:00:00-05:00' : p[0].trim());
+      const q=parseFloat(p[1].replace(',','.'));
+      if(!isNaN(t)&&!isNaN(q)) rows.push({t,q});
+    });
+    if(rows.length<2){ $('csvMsg').textContent='No se encontraron filas válidas. Usa columnas fecha,caudal con fechas como 2026-10-08.'; return; }
+    setObs(r.id,rows); renderDetail();
+    $('csvMsg').textContent=rows.length+' mediciones cargadas.';
+  });
+  const cc=$('csvClear'); if(cc) cc.addEventListener('click',()=>{ setObs(r.id,null); renderDetail(); });
+  $('dl').addEventListener('click',()=>{
+    const a=x.a; let csv='fecha_hora_bogota,lluvia_mm_h,caudal_modelo_m3s\n';
+    x.t.forEach((t,i)=>{ csv+=`${new Date(t-5*H).toISOString().slice(0,16)},${a.P[i].toFixed(2)},${a.Q[i].toFixed(3)}\n`; });
+    const b=new Blob([csv],{type:'text/csv'}), u=URL.createObjectURL(b), l=document.createElement('a');
+    l.href=u; l.download=`${r.id}_modelo.csv`; l.click(); URL.revokeObjectURL(u);
+  });
+}
+
+/* ---------- tema ---------- */
+$('themeBtn').addEventListener('click',()=>{
+  const dark=document.documentElement.dataset.theme!=='dark';
+  document.documentElement.dataset.theme=dark?'dark':'light';
+  $('themeBtn').textContent=dark?'Tema claro':'Tema oscuro';
+  try{ localStorage.setItem('theme',dark?'dark':'light'); }catch(e){}
+  if(S.data[S.sel]&&S.data[S.sel].a) drawChart();
+});
+try{ if(localStorage.getItem('theme')==='dark'){ document.documentElement.dataset.theme='dark'; $('themeBtn').textContent='Tema claro'; } }catch(e){}
+
+let rz; window.addEventListener('resize',()=>{ clearTimeout(rz); rz=setTimeout(()=>{ if(S.data[S.sel]&&S.data[S.sel].a) drawChart(); },150); });
+
+/* ---------- arranque ---------- */
+async function main(){
+  initMap();
+  renderList();
+  loadOSM();
+  let ok=0;
+  await Promise.all(RIVERS.map(async (r,i)=>{
+    try{ S.data[r.id]=await loadRiver(r); ok++; }
+    catch(e){ S.data[r.id]={err:true}; }
+  }));
+  if(!ok){
+    S.demo=true;
+    RIVERS.forEach((r,i)=>{ S.data[r.id]=demoRiver(r,i); });
+  }
+  RIVERS.forEach(r=>{ const d=S.data[r.id]; if(d&&!d.err) d.a=analyze(r,d); });
+  const hasGlo = RIVERS.some(r=>S.data[r.id].glo && S.data[r.id].real);
+  const dot=$('statusDot'); dot.className='dot'+(S.demo?' demo':'');
+  $('statusText').textContent = S.demo ? 'Datos simulados (sin conexión)' : ('Datos reales actualizados · '+fmtDT(Date.now()));
+  const bn=$('banner');
+  if(S.demo){ bn.textContent='No se pudo conectar con las fuentes de datos. Lo que ves son DATOS SIMULADOS de demostración para mostrar cómo funciona la página. No los uses para tomar decisiones.'; bn.classList.add('on'); }
+  else if(!hasGlo){ bn.textContent='El servicio de caudal GloFAS no respondió. Se muestra solo el caudal estimado por el modelo de la cuenca a partir de la lluvia.'; bn.classList.add('on'); }
+  renderToday(); renderList(); styleMap(); renderDetail();
+}
+main();
+</script>
+</body>
+</html>
