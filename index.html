@@ -222,8 +222,9 @@ const fmtMM = v => v<10 ? v.toFixed(1) : Math.round(v).toString();
 const dtf = new Intl.DateTimeFormat('es-CO',{timeZone:TZ,weekday:'short',day:'numeric',month:'short',hour:'numeric',minute:'2-digit',hour12:true});
 const dtfDay = new Intl.DateTimeFormat('es-CO',{timeZone:TZ,weekday:'short',day:'numeric',month:'short'});
 const dtfShort = new Intl.DateTimeFormat('es-CO',{timeZone:TZ,day:'2-digit',month:'2-digit'});
-const fmtDT = ms => dtf.format(ms).replace(/\./g,'');
-const fmtDay = ms => dtfDay.format(ms).replace(/\./g,'');
+const fmtDT = ms => dtf.format(ms).replace(/\b(\w{3,4})\./g,'$1').replace(/\u202f|\u00a0/g,' ');
+const noDay = s => s.replace(/^[^,]+,\s*/,'');
+const fmtDay = ms => dtfDay.format(ms).replace(/\b(\w{3,4})\./g,'$1');
 const dayStr = ms => new Date(ms - 5*H).toISOString().slice(0,10);   // fecha local de Bogotá (UTC-5)
 const parseLocal = s => Date.parse(s.length===10 ? s+'T12:00:00-05:00' : s+':00-05:00');
 const sum = (a,i,j) => { let s=0; for(let k=Math.max(0,i);k<=Math.min(a.length-1,j);k++) s+=a[k]||0; return s; };
@@ -405,7 +406,7 @@ function renderToday(){
     <div class="t"><b>${fmtMM(avg(a=>a.r24))}<em>mm</em></b><small>Lluvia en las últimas 24 h (promedio de cuencas)</small></div>
     <div class="t"><b>${fmtMM(avg(a=>a.f72))}<em>mm</em></b><small>Lluvia pronosticada en las próximas 72 h</small></div>
     <div class="t"><b>${surging} de ${A.length}</b><small>${surging? 'ríos con subida esperada esta semana':'ríos con subida esperada: ninguno por ahora'}</small></div>
-    <div class="t"><b>${soonest? fmtDT(soonest.peak.start).replace(/^\w+\s/,''):'Sin crecidas'}</b><small>${soonest? 'Primera subida estimada: '+esc(RIVERS.find(r=>S.data[r.id].a===soonest).name):'No se espera aumento importante de caudal'}</small></div>`;
+    <div class="t"><b>${soonest? noDay(fmtDT(soonest.peak.start)):'Sin crecidas'}</b><small>${soonest? 'Primera subida estimada: '+esc(RIVERS.find(r=>S.data[r.id].a===soonest).name):'No se espera aumento importante de caudal'}</small></div>`;
 }
 
 /* ---------- interfaz: tarjetas ---------- */
@@ -445,7 +446,7 @@ function renderList(){
 let map, riverLayers={}, markers={};
 function initMap(){
   map = L.map('map',{scrollWheelZoom:false}).setView([11.20,-74.08],10);
-  const light = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{maxZoom:18,attribution:'© OpenStreetMap, © CARTO'});
+  const light = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18,attribution:'© OpenStreetMap, © CARTO'});
   const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:17,attribution:'Imágenes © Esri'});
   const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxZoom:17,attribution:'© OpenTopoMap'});
   light.addTo(map);
@@ -646,7 +647,7 @@ function drawChart(){
   (obs()||[]).forEach(o=>{ if(o.t>=t0&&o.t<=t1) s+=`<circle cx="${X(o.t)}" cy="${Y(o.q)}" r="4" fill="var(--dry)" stroke="var(--paper)" stroke-width="1.5"/>`; });
   // pico esperado
   const pk = lab? peakOf(lab.Q,x,a) : a.peak;
-  if(pk){ const px=X(pk.t), py=Y(pk.q); s+=`<circle cx="${px}" cy="${py}" r="6" fill="none" stroke="${lab?'var(--surge)':'var(--river)'}" stroke-width="2.4"/><text x="${Math.min(px,W-90)}" y="${py-12}" font-size="11.5" font-weight="600" fill="var(--ink)">Pico ${fmtDT(pk.t).replace(/^\w+\s/,'')}</text>`; }
+  if(pk){ const px=X(pk.t), py=Y(pk.q); s+=`<circle cx="${px}" cy="${py}" r="6" fill="none" stroke="${lab?'var(--surge)':'var(--river)'}" stroke-width="2.4"/><text x="${Math.min(px,W-90)}" y="${py-12}" font-size="11.5" font-weight="600" fill="var(--ink)">Pico ${noDay(fmtDT(pk.t))}</text>`; }
   // ahora
   s+=`<line x1="${X(a.now)}" x2="${X(a.now)}" y1="${m.t}" y2="${flowBot}" stroke="var(--ink)" stroke-width="1.6"/><text x="${X(a.now)+5}" y="${flowBot-6}" font-size="11.5" font-weight="600" fill="var(--ink)">Ahora</text>`;
   s+=`<text x="${X(a.now)-6}" y="${flowBot-6}" font-size="11" text-anchor="end" fill="var(--ink2)">observado</text><text x="${W-r_(m)}" y="${m.t+rainH+10}" font-size="11" text-anchor="end" fill="var(--ink2)">pronóstico</text>`;
